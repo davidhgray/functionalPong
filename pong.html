@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Pong</title>
+    <style>
+        canvas {
+            width: 800px;
+            height: 500px;
+            border: solid red 4px;
+            background-color: black;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="canvas"></canvas>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/immutable/3.8.1/immutable.js"></script>
+    <script>
+        var Map = Immutable.Map;
+        var List = Immutable.List;
+
+        var m = Map({});
+        console.log(m.merge({a: 3, b: 9}).toString());
+        console.log(m['a']);
+        console.log('after');
+
+        const list1 = List([ 1, {a: 3} ]);
+        const list2 = list1.push(3, 4, 5);
+        const list3 = list2.unshift(0);
+        const list4 = list1.concat(list2, list3);
+        console.log(list3.toString());
+        console.log(list4.toString());
+        console.log(list1.size === 2);
+        console.log(list2.size === 5);
+        console.log(list3.size === 6);
+        console.log(list4.size === 13);
+        console.log(list4.get(0) === 1);
+
+
+        var canvas = document.getElementById('canvas');
+        var ctx = canvas.getContext('2d');
+        canvas.width = 800;
+        canvas.height = 500;
+
+        const MAX_SCORE = 5;
+        const PADDLE_SPEED = 4;
+
+        const WIN_SOUND = new Audio('win.mp3');
+        const PONG_SOUND = new Audio('pong.mp3');
+        const SCORE_SOUND = new Audio('woohoo.wav');
+
+        if (navigator.userAgent.search("Firefox") > -1) {
+            var GAMEPAD_UP = 14;
+            var GAMEPAD_DOWN = 15;
+        } else {  // chrome
+            var GAMEPAD_UP = 12;
+            var GAMEPAD_DOWN = 13;
+        }
+
+
+        var keys = {
+            up: false,
+            down: false,
+            a: false,
+            z: false
+        };
+
+
+        var state = Map({
+            gameOver: false,
+            left: Map({
+                score: 0,
+                scoreX: 362,
+                scoreY: 30,
+                y: 200,
+                x: 20,
+                width: 20,
+                height: 110,
+                gamepad: null
+            }),
+            right: Map({
+                score: 0,
+                scoreX: 420,
+                scoreY: 30,
+                x: canvas.width - 20 - 20,
+                y: 200,
+                width: 20,
+                height: 110,
+                gamepad: null
+            }),
+            ball: Map({
+                x: canvas.width / 2,
+                y: canvas.height / 2,
+                dx: 3,
+                dy: 5,
+                radius: 15
+            })
+        });
+
+
+        document.body.addEventListener('keydown', function(evt) {
+            switch (evt.keyCode) {
+                case 38:
+                    keys.up = true;
+                    break;
+                case 40:
+                    keys.down = true;
+                    break;
+                case 65:
+                    keys.a = true;
+                    break;
+                case 90:
+                    keys.z = true;
+                    break;
+                case 82:
+                    // 'r'
+                    if (gameOver) {
+                        resetGame();
+                    }
+                    break;
+            }
+        });
+
+        document.body.addEventListener('keyup', function(evt) {
+            switch (evt.keyCode) {
+                case 38:
+                    keys.up = false;
+                    break;
+                case 40:
+                    keys.down = false;
+                    break;
+                case 65:
+                    keys.a = false;
+                    break;
+                case 90:
+                    keys.z = false;
+                    break;
+            }
+        });
+
+        window.addEventListener("gamepadconnected", function(e) {
+            var gp = navigator.getGamepads()[e.gamepad.index];
+            console.log("Gamepad connected at index %d: %s. %d buttons, %d axes.",
+                gp.index, gp.id,
+                gp.buttons.length, gp.axes.length);
+            if (left.gamepad === null) {
+                left.gamepad = gp;
+            } else if (right.gamepad === null) {
+                right.gamepad = gp;
+            }
+        });
+
+        function draw() {
+            // clear screen
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (gameOver) {
+                ctx.font = '100px sans-serif';
+                ctx.fillStyle = 'white';
+                ctx.fillText('GAME OVER', 100, 270);
+                return;
+            }
+
+            // draw net
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+            var mid = canvas.width / 2;
+            ctx.fillRect(mid - 10, 0, 20, canvas.height);
+
+            // draw left paddle
+            ctx.fillStyle = 'orange';
+            ctx.fillRect(left.x, left.y, left.width, left.height);
+
+            // draw right paddle
+            ctx.fillStyle = 'green';
+            ctx.fillRect(right.x, right.y, right.width, right.height);
+
+            // draw ball
+            ctx.fillStyle = 'red';
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2, false);
+            ctx.fill();
+
+            // draw score
+            ctx.font = '30px sans-serif';
+            ctx.fillStyle = 'white';
+            ctx.fillText(left.score, left.scoreX, left.scoreY);
+            ctx.fillText(right.score, right.scoreX, right.scoreY);
+        }
+
+        function input() {
+            initGamepads();
+
+            var input = {
+                leftUp: false,
+                leftDown: false,
+                rightUp: false,
+                rightDown: false
+            };
+
+            if (right.gamepad !== null) {
+                input.rightUp = keys.up || right.gamepad.buttons[GAMEPAD_UP].pressed;
+                input.rightDown = keys.down || right.gamepad.buttons[GAMEPAD_DOWN].pressed;
+            } else {
+                input.rightUp = keys.up;
+                input.rightDown = keys.down;
+            }
+
+            if (left.gamepad !== null) {
+                input.leftUp = keys.a || left.gamepad.buttons[GAMEPAD_UP].pressed;
+                input.leftDown = keys.z || left.gamepad.buttons[GAMEPAD_DOWN].pressed;
+            } else {
+                input.leftUp = keys.a;
+                input.leftDown = keys.z;
+            }
+
+            return Map(input);
+        }
+
+        function updatePaddles(input, state) {
+     var left = state.get('left');
+     var right = state.get('right');
+
+     if (input.get('rightUp') && input.get('rightDown')) {
+         // don't move when both are pressed
+     } else if (input.get('rightUp')) {
+         right = right.set('y', right.get('y') - PADDLE_SPEED);
+         if (right.get('y') < 0) {
+             right = right.set('y', 0);
+         }
+     } else if (input.get('rightDown')) {
+         right = right.set('y', right.get('y') + PADDLE_SPEED);
+         if (right.get('y') + right.get('height') > canvas.height) {
+             right = right.set('y', canvas.height - right.get('height'));
+         }
+     }
+
+     if (input.get('leftUp') && input.get('leftDown')) {
+         // don't move when both are pressed
+     } else if (input.get('leftUp')) {
+         left = left.set('y', left.get('y') - PADDLE_SPEED);
+         if (left.get('y') < 0) {
+             left = left.set('y', 0);
+         }
+     } else if (input.get('leftDown')) {
+         left = left.set('y', left.get('y') + PADDLE_SPEED);
+         if (left.get('y') + left.get('height') > canvas.height) {
+             left = left.set('y', canvas.height - left.get('height'));
+         }
+     }
+
+     return state.merge({
+         left: left,
+         right: right,
+     };
+ }
+
+ function updateBall(input, state) {
+     var ball = state.get('ball');
+     var newX = ball.get('dx') + ball.get('x');
+     var newY = ball.get('dy') + ball.get('y');
+     var newBall = state.get('ball').merge({x: newX, y: newY});
+
+     if (newBall.get('y') - newBall.get('radius') < 0) {
+         // bounce off ceiling
+         newBall = newBall.merge({
+             y: newBall.get('radius'),
+             dy: -newBall.get('dy')
+         });
+     } else if (newBall.get('y') - newBall.get('radius') > canvas.height) {
+         // bounce off floor
+         newBall = newBall.merge({
+             y: canvas.height - newBall.get('radius'),
+             dy: -newBall.get('dy')
+         });
+     }
+
+     // hit right wall, left scores
+     if (newBall.get('x') + newBall.get('radius') > canvas.width) {
+        //  state.merge(left.score: state.get('left').get(score)++); TODO--fix things
+         if (left.score === MAX_SCORE) {
+             gameOver = true;
+             WIN_SOUND.play(); //take all these play sound things out
+         } else {
+             SCORE_SOUND.play();
+         }
+         resetServe();
+     }
+
+     // hit left wall, right scores
+     if (ball.x - ball.radius < 0) {
+         right.score++;
+         if (right.score === MAX_SCORE) {
+             gameOver = true;
+             WIN_SOUND.play();
+         } else {
+             SCORE_SOUND.play();
+         }
+         resetServe();
+     }
+
+     // hit paddles
+     if (intersect(newBall, status.get(right))) {
+         newBall = newBall.merge({
+             x: state.get('right').get('x') - newBall.get('radius'),
+             dx: -newBall.get('dx')
+         });
+     } else if (intersect(newBall, status.get(left)) {
+         newBall = newBall.merge({
+             x: state.get('left').get('x') + state.get('left').get('width') + newBall.get('radius'),
+             dx: -newBall.get('dx')
+         });
+     }
+
+}
+
+        function update(input, state) {
+            var st = state;
+
+            if (gameOver) {
+                return;
+            }
+
+var st = updatePaddles(input, state);
+
+var st = updateBall(input, state);
+
+            if (input.get('rightUp') && input.get('rightDown')) {
+                // don't move when both are pressed
+            } else if (input.get('rightUp')) {
+                right.y -= PADDLE_SPEED;
+                if (right.y < 0) {
+                    right.y = 0;
+                }
+            } else if (input.get('rightDown')) {
+                right.y += PADDLE_SPEED;
+                if (right.y + right.height > canvas.height) {
+                    right.y = canvas.height - right.height;
+                }
+            }
+
+            if (input.get('leftUp') && input.get('leftDown')) {
+                // don't move when both are pressed
+            } else if (input.get('leftUp')) {
+                left.y -= PADDLE_SPEED;
+                if (left.y < 0) {
+                    left.y = 0;
+                }
+            } else if (input.get('leftDown')) {
+                left.y += PADDLE_SPEED;
+                if (left.y + left.height > canvas.height) {
+                    left.y = canvas.height - left.height;
+                }
+            }
+
+            // move ball
+            var ball = st.get('ball');
+            var newX = ball.get('dx') + ball.get('x');
+            var newY = ball.get('dy') + ball.get('y');
+            var newBall = st.get('ball').merge({x: newX, y: newY});
+
+            if (st.get(ball).get(y) - st.get(ball).get(radius) < 0) {
+                // bounce off ceiling
+                newY = st.get(ball).get(y);
+                newDY = -st.get(ball).get(dy);
+                PONG_SOUND.play();
+            } else if (st.get(ball).get(y) - st.get(ball).get(radius) > canvas.height) {
+                // bounce off floor
+                newY = canvas.height - st.get(ball).get(radius);
+                newDY = -st.get(ball).get(dy);
+                PONG_SOUND.play();
+            }
+
+// TODO for functionalPong for these three "hit" functions, make them functional.
+            // hit right wall, left scores
+            if (ball.x + ball.radius > canvas.width) {
+                left.score++;
+                if (left.score === MAX_SCORE) {
+                    gameOver = true;
+                    WIN_SOUND.play(); //take all these play sound things out
+                } else {
+                    SCORE_SOUND.play();
+                }
+                resetServe();
+            }
+
+            // hit left wall, right scores
+            if (ball.x - ball.radius < 0) {
+                right.score++;
+                if (right.score === MAX_SCORE) {
+                    gameOver = true;
+                    WIN_SOUND.play();
+                } else {
+                    SCORE_SOUND.play();
+                }
+                resetServe();
+            }
+
+            // hit paddles
+            if (intersect(ball, right)) {
+                ball.x = right.x - ball.radius;
+                ball.dx = -ball.dx;
+                PONG_SOUND.play();
+            } else if (intersect(ball, left)) {
+                ball.x = left.x + left.width + ball.radius;
+                ball.dx = -ball.dx;
+                PONG_SOUND.play();
+            }
+
+            return Map({
+                gameOver: newGameOver,
+                left: newLeft,
+                right: newRight,
+                ball: newBall
+            });
+        }
+
+        function intersect(ball, paddle) {
+            var left = ball.x - ball.radius;
+            var top = ball.y - ball.radius;
+            var right = ball.x + ball.radius;
+            var bottom = ball.y + ball.radius;
+            return !(right < paddle.x ||
+                top > paddle.y + paddle.height ||
+                left > paddle.x + paddle.width ||
+                bottom < paddle.y
+            );
+        }
+
+        function resetGame() {
+            resetServe();
+        }
+
+        function resetServe() {
+            ball.x = canvas.width / 2;
+            ball.y = canvas.height / 2;
+            // TODO random dx, dy
+        }
+
+        function initGamepads() {
+            var gps = navigator.getGamepads();
+            if (gps[0]) {
+                left.gamepad = gps[0];
+            }
+            if (gps[1]) {
+                right.gamepad = gps[1];
+            }
+        }
+
+        function tick(dt) {
+            state = update(input(), state);
+            draw();
+            requestAnimationFrame(tick);
+        }
+        requestAnimationFrame(tick);
+    </script>
+</body>
+
+</html>
